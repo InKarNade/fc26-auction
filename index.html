@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FC 26 Live Multiplayer Auction Room</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        body { background-color: #0b0f19; color: #f3f4f6; font-family: system-ui, sans-serif; }
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #111827; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+    </style>
+</head>
+<body class="p-4">
+
+    <div id="lobby-screen" class="max-w-md mx-auto my-20 p-6 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl space-y-6">
+        <h1 class="text-3xl font-extrabold text-center tracking-tight text-yellow-500">FC 26 MULTIPLAYER AUCTION</h1>
+        <div class="space-y-4">
+            <button onclick="chooseRole('admin')" class="w-full py-3 bg-blue-600 hover:bg-blue-700 font-bold rounded-lg transition">🔑 Enter as Host / Admin</button>
+            <div class="border-t border-gray-800 my-4"></div>
+            <label class="block text-sm font-medium text-gray-400">Join Room as Manager</label>
+            <input type="text" id="manager-name-input" placeholder="Enter Team / Manager Name" class="w-full p-3 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none focus:border-yellow-500 text-white">
+            <button onclick="chooseRole('manager')" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 font-bold rounded-lg transition">🎮 Join Live Draft</button>
+        </div>
+    </div>
+
+    <div id="admin-setup-screen" class="hidden max-w-2xl mx-auto p-6 bg-gray-900 border border-gray-800 rounded-xl space-y-6">
+        <h2 class="text-2xl font-bold text-yellow-500 border-b border-gray-800 pb-2">Room Configurations (Admin Only)</h2>
+        
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Starting Purse</label>
+                <input type="range" id="setup-purse" min="10000" max="15000" step="500" value="10000" oninput="document.getElementById('purse-val').innerText = this.value" class="w-full accent-yellow-500">
+                <span class="text-sm text-yellow-400 font-bold" id="purse-val">10000</span> <span class="text-xs text-gray-400">Coins</span>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Timer Clock (Seconds)</label>
+                <input type="range" id="setup-timer" min="15" max="30" step="1" value="15" oninput="document.getElementById('timer-val').innerText = this.value" class="w-full accent-yellow-500">
+                <span class="text-sm text-yellow-400 font-bold" id="timer-val">15</span> <span class="text-xs text-gray-400">Sec</span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Max Squad Size</label>
+                <select id="setup-max-players" class="w-full bg-gray-800 border border-gray-700 p-2 rounded-md">
+                    <option value="20">20 Players max</option>
+                    <option value="25">25 Players max</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Manager Special Powers</label>
+                <select id="setup-superpower" class="w-full bg-gray-800 border border-gray-700 p-2 rounded-md">
+                    <option value="true">Enabled (1x Release & Resell)</option>
+                    <option value="false">Disabled</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="p-4 bg-gray-950 rounded-lg space-y-3">
+            <h3 class="text-sm font-bold text-gray-300">Set Minimum Player Ratings</h3>
+            <div class="grid grid-cols-4 gap-2 text-black">
+                <input type="number" id="min-GK" value="87" placeholder="GK" class="p-2 rounded text-center font-bold">
+                <input type="number" id="min-DF" value="84" placeholder="DF" class="p-2 rounded text-center font-bold">
+                <input type="number" id="min-CM" value="84" placeholder="CM" class="p-2 rounded text-center font-bold">
+                <input type="number" id="min-ST" value="85" placeholder="ST" class="p-2 rounded text-center font-bold">
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Upload Excel Asset ("Database FC 26.xlsx")</label>
+            <input type="file" id="excel-file-uploader" accept=".xlsx, .xls, .csv" class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-yellow-600 file:text-white hover:file:bg-yellow-700 cursor-pointer">
+        </div>
+
+        <button onclick="processAndInitializeGame()" class="w-full py-3 bg-yellow-500 text-black font-black uppercase text-center rounded-lg shadow-lg tracking-wide hover:bg-yellow-400 transition">Launch Room & Sync Managers</button>
+    </div>
+
+    <div id="game-arena" class="hidden space-y-4">
+        
+        <div class="flex items-center justify-between p-4 bg-gray-900 border border-gray-800 rounded-xl">
+            <div>
+                <h2 class="text-xl font-black text-yellow-500 tracking-wide">FC 26 MULTIPLAYER ARENA</h2>
+                <p id="current-phase-badge" class="text-xs uppercase font-semibold text-blue-400 tracking-widest mt-0.5">PHASE 1</p>
+            </div>
+            <div id="admin-controls" class="hidden flex items-center gap-2">
+                <button onclick="socket.emit('admin-trigger-rebid')" class="px-3 py-1.5 bg-indigo-600 text-xs font-bold rounded hover:bg-indigo-700 transition">🔄 Rebid Last Player</button>
+                <button onclick="socket.emit('admin-end-phase1')" class="px-3 py-1.5 bg-red-600 text-xs font-bold rounded hover:bg-red-700 transition">🛑 End Phase 1</button>
+                <button onclick="triggerResetConfirmation()" class="px-3 py-1.5 bg-gray-800 border border-gray-700 text-xs font-bold rounded hover:bg-gray-700 transition text-red-400">Wipe Server</button>
+            </div>
+            <div>
+                <button onclick="exportDraftData()" class="px-4 py-2 bg-emerald-600 text-xs font-bold uppercase rounded-lg tracking-wider shadow hover:bg-emerald-500 transition">Export Rosters</button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            
+            <div class="lg:col-span-8 bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col md:flex-row gap-6 items-center justify-center min-h-[420px]">
+                
+                <div id="admin-draw-actions" class="hidden flex-col gap-2 w-full md:w-44">
+                    <p class="text-xs font-bold tracking-wider text-gray-500 uppercase mb-1">Draw Next Player</p>
+                    <button onclick="socket.emit('draw-player','GK')" class="py-2.5 bg-gray-800 border border-gray-700 hover:border-yellow-500 rounded font-bold text-sm text-left px-3 flex justify-between"><span>🧤 Draw GK</span> <span id="cnt-GK" class="text-xs text-yellow-500">0</span></button>
+                    <button onclick="socket.emit('draw-player','DF')" class="py-2.5 bg-gray-800 border border-gray-700 hover:border-yellow-500 rounded font-bold text-sm text-left px-3 flex justify-between"><span>🛡️ Draw DF</span> <span id="cnt-DF" class="text-xs text-yellow-500">0</span></button>
+                    <button onclick="socket.emit('draw-player','CM')" class="py-2.5 bg-gray-800 border border-gray-700 hover:border-yellow-500 rounded font-bold text-sm text-left px-3 flex justify-between"><span>⚙️ Draw CM</span> <span id="cnt-CM" class="text-xs text-yellow-500">0</span></button>
+                    <button onclick="socket.emit('draw-player','ST')" class="py-2.5 bg-gray-800 border border-gray-700 hover:border-yellow-500 rounded font-bold text-sm text-left px-3 flex justify-between"><span>🎯 Draw ST</span> <span id="cnt-ST" class="text-xs text-yellow-500">0</span></button>
+                </div>
+
+                <div id="card-mount-zone" class="w-72 h-96 bg-gradient-to-b from-yellow-600 to-yellow-950 rounded-2xl p-4 relative shadow-2xl flex flex-col justify-between text-black select-none border border-yellow-400">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div id="card-rating" class="text-4xl font-black leading-none">--</div>
+                            <div id="card-pos" class="text-xs font-black tracking-widest bg-black text-yellow-500 px-1 rounded mt-1 text-center">POS</div>
+                        </div>
+                        <div class="flex flex-col gap-1 items-end text-[10px] font-bold text-yellow-200 uppercase bg-black/40 p-1.5 rounded border border-yellow-500/30 w-24" id="card-alt-positions">
+                            </div>
+                    </div>
+
+                    <div class="my-1 text-center">
+                        <div id="card-name" class="text-xl font-black uppercase tracking-wide truncate drop-shadow">SELECT PLAYER</div>
+                    </div>
+
+                    <div class="grid grid-cols-6 gap-1 bg-black/60 text-white p-2 rounded-lg text-center text-xs border border-gray-800">
+                        <div><div class="font-bold" id="stat-PAC">--</div><div class="text-[9px] text-gray-400">PAC</div></div>
+                        <div><div class="font-bold" id="stat-SHO">--</div><div class="text-[9px] text-gray-400">SHO</div></div>
+                        <div><div class="font-bold" id="stat-PAS">--</div><div class="text-[9px] text-gray-400">PAS</div></div>
+                        <div><div class="font-bold" id="stat-DRI">--</div><div class="text-[9px] text-gray-400">DRI</div></div>
+                        <div><div class="font-bold" id="stat-DEF">--</div><div class="text-[9px] text-gray-400">DEF</div></div>
+                        <div><div class="font-bold" id="stat-PHY">--</div><div class="text-[9px] text-gray-400">PHY</div></div>
+                    </div>
+
+                    <div class="bg-black/80 rounded-lg p-2 border border-yellow-500/40 text-white text-[11px] h-20 overflow-hidden custom-scroll">
+                        <div class="font-bold text-yellow-400 text-[10px] tracking-wider uppercase mb-1">Playstyles+</div>
+                        <div id="card-playstyles" class="space-y-1">--</div>
+                    </div>
+                </div>
+
+                <div class="flex-1 flex flex-col items-center justify-center bg-gray-950 p-6 rounded-xl border border-gray-800 w-full md:w-auto self-stretch">
+                    <div class="text-center space-y-1 mb-6">
+                        <p class="text-xs text-gray-400 font-bold tracking-widest uppercase">Current Valuation</p>
+                        <h1 id="hud-current-price" class="text-5xl font-black text-yellow-400 tracking-tight">0 <span class="text-lg">Coins</span></h1>
+                        <p id="hud-highest-bidder" class="text-sm font-semibold text-gray-300">Awaiting opening bid...</p>
+                    </div>
+
+                    <div class="relative w-24 h-24 flex items-center justify-center mb-6">
+                        <div class="absolute inset-0 rounded-full border-4 border-gray-800"></div>
+                        <div id="hud-timer-display" class="text-3xl font-black text-red-500">00</div>
+                    </div>
+
+                    <div class="w-full space-y-2">
+                        <button id="manager-bid-btn" onclick="socket.emit('place-bid')" class="w-full py-4 bg-yellow-500 text-black font-black uppercase text-lg rounded-xl shadow-xl tracking-wider hover:bg-yellow-400 active:scale-95 transform transition disabled:opacity-30 disabled:pointer-events-none">🔥 Place Raise</button>
+                        <button id="admin-hammer-btn" onclick="socket.emit('admin-force-hammer')" class="hidden w-full py-2 bg-red-600 hover:bg-red-700 font-bold uppercase text-xs tracking-wider rounded-lg transition">🔨 Force Hammer Down</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-4 bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col h-[420px]">
+                <h3 class="text-xs font-bold uppercase text-gray-400 tracking-wider mb-2 pb-1 border-b border-gray-800">Live Feed Room Monitor</h3>
+                <div id="bidding-logs-stream" class="flex-1 overflow-y-auto space-y-1.5 text-sm font-mono custom-scroll pr-1">
+                    </div>
+            </div>
+        </div>
+
+        <div id="phase2-prompt-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+            <div class="bg-gray-900 border border-gray-800 max-w-sm w-full p-6 rounded-xl space-y-4 text-center">
+                <h3 class="text-xl font-bold text-yellow-500">Phase 1 Complete!</h3>
+                <p class="text-sm text-gray-400">Would the managers like to start Phase 2 to auction off players that went unsold?</p>
+                <div id="admin-phase2-actions" class="hidden grid grid-cols-2 gap-3">
+                    <button onclick="socket.emit('admin-phase2-decision', true)" class="py-2.5 bg-emerald-600 font-bold rounded-lg text-white">Yes, Start Phase 2</button>
+                    <button onclick="socket.emit('admin-phase2-decision', false)" class="py-2.5 bg-red-600 font-bold rounded-lg text-white">No, End Draft</button>
+                </div>
+                <div id="manager-phase2-wait" class="text-xs text-blue-400 font-semibold animate-pulse">Waiting for host decision...</div>
+            </div>
+        </div>
+
+        <div id="reset-confirm-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+            <div class="bg-gray-900 border border-red-900 max-w-sm w-full p-6 rounded-xl text-center space-y-4">
+                <h3 class="text-lg font-bold text-red-500">Wipe Server?</h3>
+                <p class="text-xs text-gray-400">This completely clears current manager dashboards, room states, and loaded player profiles.</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="socket.emit('admin-restart-game'); hideResetModal();" class="py-2 bg-red-600 font-bold rounded text-xs uppercase">Confirm Wipe</button>
+                    <button onclick="hideResetModal()" class="py-2 bg-gray-800 font-bold rounded text-xs uppercase">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <h3 class="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Manager Dashboards & Selected Squad Rosters</h3>
+            <div id="manager-dashboards-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let clientRole = null;
+        let globalState = null;
+
+        function chooseRole(role) {
+            if (role === 'manager') {
+                const name = document.getElementById('manager-name-input').value.trim();
+                if (!name) { return alert('Please input your manager/team name.'); }
+                clientRole = 'manager';
+                socket.emit('register-manager', name);
+            } else {
+                clientRole = 'admin';
+                document.getElementById('lobby-screen').classList.add('hidden');
+                document.getElementById('admin-setup-screen').classList.remove('hidden');
+            }
+        }
+
+        function triggerResetConfirmation() { document.getElementById('reset-confirm-modal').classList.remove('hidden'); }
+        function hideResetModal() { document.getElementById('reset-confirm-modal').classList.add('hidden'); }
+
+        function processAndInitializeGame() {
+            const fileInput = document.getElementById('excel-file-uploader');
+            const config = {
+                purse: parseInt(document.getElementById('setup-purse').value),
+                timerDuration: parseInt(document.getElementById('setup-timer').value),
+                maxPlayers: parseInt(document.getElementById('setup-max-players').value),
+                superPowerEnabled: document.getElementById('setup-superpower').value === 'true',
+                minRatings: {
+                    GK: parseInt(document.getElementById('min-GK').value) || 87,
+                    DF: parseInt(document.getElementById('min-DF').value) || 84,
+                    CM: parseInt(document.getElementById('min-CM').value) || 84,
+                    ST: parseInt(document.getElementById('min-ST').value) || 85
+                }
+            };
+
+            if (fileInput.files.length > 0) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const json = XLSX.utils.sheet_to_json(sheet);
+                    
+                    const processed = cleanAndNormalizeData(json, config.minRatings);
+                    if (processed.length === 0) {
+                        alert("No players matched your minimum rating criteria filters in the Excel file!");
+                        return;
+                    }
+                    socket.emit('admin-init-game', config, processed);
+                };
+                reader.readAsArrayBuffer(fileInput.files[0]);
+            } else {
+                alert("Please attach your 'Database FC 26.xlsx' spreadsheet file to initialize the asset libraries.");
+            }
+        }
+
+        // Helper function to strip brackets/quotes from Python-style string arrays from the CSV
+        function parseListString(val) {
+            if (!val) return [];
+            let str = String(val);
+            // Strips out [ ] ' "
+            str = str.replace(/[\[\]"']/g, '');
+            if (!str.trim()) return [];
+            // Split correctly by comma and strip any whitespace
+            return str.split(',').map(s => s.trim()).filter(Boolean);
+        }
+
+        function cleanAndNormalizeData(rows, minRatings) {
+            let output = [];
+            rows.forEach(row => {
+                let normalizedRow = {};
+                Object.keys(row).forEach(k => {
+                    let cleanKey = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    normalizedRow[cleanKey] = row[k];
+                });
+
+                let name = row["Name"] || row["Player Name"] || normalizedRow["name"] || normalizedRow["playername"] || "Unknown";
+                let rating = parseInt(row["Rating"] || row["OVR"] || normalizedRow["rating"] || normalizedRow["ovr"] || 0);
+                let rawPos = (row["Position"] || normalizedRow["position"] || "CM").toUpperCase();
+                
+                // Target the exact CSV header names robustly
+                let playstyleRaw = row["play style"] || row["Playstyles"] || row["Playstyles+"] || normalizedRow["playstyle"] || normalizedRow["playstyles"] || "";
+                let altPosRaw = row["Alternative positions"] || row["Alt Positions"] || normalizedRow["alternativepositions"] || normalizedRow["altpositions"] || "";
+
+                // Group roles to basic archetypes
+                let roleGroup = 'CM';
+                if (rawPos.includes('GK')) roleGroup = 'GK';
+                else if (rawPos.includes('CB') || rawPos.includes('LB') || rawPos.includes('RB') || rawPos.includes('LWB') || rawPos.includes('RWB') || rawPos.includes('DF')) roleGroup = 'DF';
+                else if (rawPos.includes('ST') || rawPos.includes('CF') || rawPos.includes('LW') || rawPos.includes('RW')) roleGroup = 'ST';
+
+                // Enforce strict rating floors
+                if (rating >= (minRatings[roleGroup] || 81)) {
+                    output.push({
+                        Name: name,
+                        Rating: rating,
+                        Position: rawPos,
+                        RoleGroup: roleGroup,
+                        AltPositions: parseListString(altPosRaw),
+                        Playstyles: parseListString(playstyleRaw),
+                        Pac: parseInt(row["PAC"] || row["Pace"] || 75),
+                        Sho: parseInt(row["SHO"] || row["Shooting"] || 75),
+                        Pas: parseInt(row["PAS"] || row["Passing"] || 75),
+                        Dri: parseInt(row["DRI"] || row["Dribbling"] || 75),
+                        Def: parseInt(row["DEF"] || row["Defending"] || 75),
+                        Phy: parseInt(row["PHY"] || row["Physicality"] || 75),
+                        status: null
+                    });
+                }
+            });
+            return output;
+        }
+
+        socket.on('state-update', (state) => {
+            globalState = state;
+            renderArena(state);
+        });
+
+        socket.on('error-msg', (txt) => { alert(txt); });
+
+        function renderArena(state) {
+            if (state.phase === 'setup') {
+                if (clientRole !== 'admin') {
+                    document.getElementById('lobby-screen').classList.remove('hidden');
+                    document.getElementById('admin-setup-screen').classList.add('hidden');
+                    document.getElementById('game-arena').classList.add('hidden');
+                }
+                return;
+            }
+
+            document.getElementById('lobby-screen').classList.add('hidden');
+            document.getElementById('admin-setup-screen').classList.add('hidden');
+            document.getElementById('game-arena').classList.remove('hidden');
+
+            document.getElementById('current-phase-badge').innerText = state.phase.toUpperCase();
+
+            if (clientRole === 'admin') {
+                document.getElementById('admin-controls').classList.remove('hidden');
+                document.getElementById('admin-draw-actions').classList.remove('hidden');
+                document.getElementById('admin-hammer-btn').classList.remove('hidden');
+                
+                if (state.phase === 'phase2-prompt') {
+                    document.getElementById('phase2-prompt-modal').classList.remove('hidden');
+                    document.getElementById('admin-phase2-actions').classList.remove('hidden');
+                    document.getElementById('manager-phase2-wait').classList.add('hidden');
+                } else {
+                    document.getElementById('phase2-prompt-modal').classList.add('hidden');
+                }
+            } else {
+                document.getElementById('admin-controls').classList.add('hidden');
+                document.getElementById('admin-draw-actions').classList.add('hidden');
+                document.getElementById('admin-hammer-btn').classList.add('hidden');
+                
+                if (state.phase === 'phase2-prompt') {
+                    document.getElementById('phase2-prompt-modal').classList.remove('hidden');
+                    document.getElementById('admin-phase2-actions').classList.add('hidden');
+                    document.getElementById('manager-phase2-wait').classList.remove('hidden');
+                } else {
+                    document.getElementById('phase2-prompt-modal').classList.add('hidden');
+                }
+            }
+
+            let targetPool = (state.phase === 'phase2') ? state.unsoldPool : state.playerPool;
+            ['GK', 'DF', 'CM', 'ST'].forEach(role => {
+                let unmanagedCount = targetPool.filter(p => p.RoleGroup === role && !p.status).length;
+                document.getElementById(`cnt-${role}`).innerText = unmanagedCount;
+            });
+
+            if (state.currentPlayer) {
+                document.getElementById('card-rating').innerText = state.currentPlayer.Rating;
+                document.getElementById('card-pos').innerText = state.currentPlayer.Position;
+                document.getElementById('card-name').innerText = state.currentPlayer.Name;
+                
+                // Alt positions array render
+                let altZone = document.getElementById('card-alt-positions');
+                altZone.innerHTML = state.currentPlayer.AltPositions.length ? '<span class="text-[8px] text-gray-400">ALT POSITIONS</span>' : '';
+                state.currentPlayer.AltPositions.forEach(ap => {
+                    altZone.innerHTML += `<span class="bg-black text-white px-1 rounded text-[9px] font-mono">${ap}</span>`;
+                });
+
+                // Stats values assignment mapping
+                ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'].forEach(s => {
+                    document.getElementById(`stat-${s}`).innerText = state.currentPlayer[s.charAt(0) + s.slice(1).toLowerCase()];
+                });
+
+                // Playstyles listing
+                let psZone = document.getElementById('card-playstyles');
+                psZone.innerHTML = '';
+                if (state.currentPlayer.Playstyles.length > 0) {
+                    state.currentPlayer.Playstyles.forEach(pstyle => {
+                        psZone.innerHTML += `<div class="flex items-center gap-1"><span class="text-yellow-400">⚡</span><span class="truncate">${pstyle}</span></div>`;
+                    });
+                } else {
+                    psZone.innerHTML = '<div class="text-gray-500 italic">No custom Playstyles+</div>';
+                }
+
+                // Pricing Updates Matrix
+                document.getElementById('hud-current-price').innerHTML = `${state.currentBid} <span class="text-lg text-gray-400">Coins</span>`;
+                if (state.highestBidderId) {
+                    let bidder = state.managers[state.highestBidderId];
+                    document.getElementById('hud-highest-bidder').innerText = `Highest Bidder: ${bidder ? bidder.name : 'Unknown'}`;
+                    document.getElementById('hud-highest-bidder').style.color = bidder ? bidder.color : '#FFF';
+                } else {
+                    document.getElementById('hud-highest-bidder').innerText = 'Awaiting opening bids...';
+                    document.getElementById('hud-highest-bidder').style.color = '#9CA3AF';
+                }
+
+                // Timer parameters
+                document.getElementById('hud-timer-display').innerText = state.timerValue.toString().padStart(2, '0');
+                if (state.timerValue <= 5) {
+                    document.getElementById('hud-timer-display').className = "text-3xl font-black text-red-500 animate-ping";
+                } else {
+                    document.getElementById('hud-timer-display').className = "text-3xl font-black text-yellow-500";
+                }
+
+                const myId = socket.id;
+                if (state.highestBidderId === myId) {
+                    document.getElementById('manager-bid-btn').disabled = true;
+                    document.getElementById('manager-bid-btn').innerText = "YOUR HIGHEST BID";
+                } else {
+                    document.getElementById('manager-bid-btn').disabled = false;
+                    let increment = state.currentBid < 1000 ? 50 : 100;
+                    document.getElementById('manager-bid-btn').innerText = `🔥 BID +${increment}c (${state.currentBid + increment}c)`;
+                }
+            } else {
+                document.getElementById('card-rating').innerText = '--';
+                document.getElementById('card-pos').innerText = 'POS';
+                document.getElementById('card-name').innerText = 'DRAFT WAITING';
+                document.getElementById('card-alt-positions').innerHTML = '';
+                ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'].forEach(s => document.getElementById(`stat-${s}`).innerText = '--');
+                document.getElementById('card-playstyles').innerHTML = '--';
+                document.getElementById('hud-current-price').innerHTML = `0 <span class="text-lg">Coins</span>`;
+                document.getElementById('hud-highest-bidder').innerText = 'Awaiting next generation draw...';
+                document.getElementById('hud-timer-display').innerText = '00';
+                document.getElementById('hud-timer-display').className = "text-3xl font-black text-gray-600";
+                document.getElementById('manager-bid-btn').disabled = true;
+                document.getElementById('manager-bid-btn').innerText = "LOCK OUT";
+            }
+
+            let feedStream = document.getElementById('bidding-logs-stream');
+            feedStream.innerHTML = '';
+            state.biddingHistory.forEach(log => {
+                let logNode = document.createElement('div');
+                logNode.className = "py-0.5 border-b border-gray-950 truncate";
+                logNode.style.color = log.color || '#FFF';
+                logNode.innerText = log.text;
+                feedStream.appendChild(logNode);
+            });
+            feedStream.scrollTop = feedStream.scrollHeight; 
+
+            let grid = document.getElementById('manager-dashboards-grid');
+            grid.innerHTML = '';
+            Object.keys(state.managers).forEach(id => {
+                let mgr = state.managers[id];
+                const isMe = (id === socket.id);
+                
+                let cardHtml = `
+                    <div class="bg-gray-950 border-2 rounded-xl p-4 flex flex-col space-y-3 h-72 ${isMe ? 'border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.15)]' : 'border-gray-800'}">
+                        <div class="flex justify-between items-start border-b border-gray-900 pb-2">
+                            <div>
+                                <h4 class="font-extrabold text-base flex items-center gap-2" style="color: ${mgr.color}">
+                                    <span>${mgr.name}</span>
+                                    ${isMe ? '<span class="text-[9px] bg-yellow-500 text-black px-1 rounded uppercase font-black tracking-wider">YOU</span>' : ''}
+                                </h4>
+                                <p class="text-[10px] text-gray-500 font-bold uppercase mt-0.5">SQUAD SIZE: <span class="text-white">${mgr.squad.length} / ${state.config.maxPlayers}</span></p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-xs text-gray-400 font-bold uppercase tracking-wider">REMAINING</p>
+                                <p class="text-lg font-black text-emerald-400 leading-none">${mgr.budget}c</p>
+                            </div>
+                        </div>
+
+                        <div class="flex-1 overflow-y-auto custom-scroll space-y-1 pr-1 text-xs font-mono">
+                            ${mgr.squad.length === 0 ? '<p class="text-gray-600 italic text-center pt-8">No players signed yet</p>' : ''}
+                            ${mgr.squad.map(p => `
+                                <div class="flex justify-between items-center bg-gray-900/60 border border-gray-800 p-1.5 rounded">
+                                    <span class="font-bold text-gray-300"><span class="text-yellow-500 text-[10px] bg-black px-1 rounded mr-1">${p.Rating}</span> ${p.Name} <span class="text-[9px] text-gray-500">(${p.Position})</span></span>
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-emerald-400 font-bold font-mono">${p.finalPrice}c</span>
+                                        ${isMe && state.config.superPowerEnabled && mgr.hasSuperPower && !state.currentPlayer ? `
+                                            <button onclick="socket.emit('use-super-power', '${p.Name}')" class="text-[10px] bg-purple-900 hover:bg-purple-700 text-purple-200 font-bold px-1 rounded border border-purple-500/40 transition">⚡ Sell</button>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+                grid.innerHTML += cardHtml;
+            });
+        }
+
+        function exportDraftData() {
+            if (!globalState) return;
+            let output = "=== FC 26 DRAFT LEAGUE AUCTION ROSTERS ===\n\n";
+            Object.keys(globalState.managers).forEach(id => {
+                let m = globalState.managers[id];
+                output += `MANAGER/TEAM: ${m.name}\n`;
+                output += `REMAINING PURSE: ${m.budget} Coins\n`;
+                output += `SQUAD SIZES: ${m.squad.length} Players\n`;
+                output += `ROSTER SIGNINGS:\n`;
+                m.squad.forEach((p, idx) => {
+                    output += `  ${idx+1}. [OVR ${p.Rating}] ${p.Name} (${p.Position}) - Purchased for ${p.finalPrice} Coins\n`;
+                });
+                output += "--------------------------------------------------\n\n";
+            });
+
+            navigator.clipboard.writeText(output).then(() => {
+                alert("Rosters summary sheet copied directly to your dashboard clipboard successfully!");
+            }).catch(() => {
+                alert("Failed to write to system clipboard. Please check browser privacy constraints.");
+            });
+        }
+    </script>
+</body>
+</html>
